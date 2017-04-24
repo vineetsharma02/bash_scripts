@@ -1,104 +1,87 @@
-# Set the base image to Ubuntu
-FROM ubuntu:16.04
+#Set the base image to Centos 6
+FROM centos:6
 
 # File Author / Maintainer
-MAINTAINER vineet sharma  "v_vineetsharma@outlook.com"
+MAINTAINER vineet sharma v_vineetsharma@outlook.com
 
 ############################################## Installing Python2.7 #################################################################
 
 # ensure local python is preferred over distribution python
 ENV PATH /usr/local/bin:$PATH
 
-# http://bugs.python.org/issue19846
-# > At the moment, setting "LANG=C" on a Linux system *fundamentally breaks Python 3*, and that's not OK.
-ENV LANG C.UTF-8
+# Install prepare infrastructure 
+RUN yum -y update \
+&& yum groupinstall -y development \
+&& yum install -y wget
 
-# Update the repository sources list
-RUN apt-get update && apt-get install -y --no-install-recommends apt-utils
 
-RUN set -ex && apt-get install -y python python-dev python-tk
+RUN set -x \
+        \
+ && wget http://www.python.org/ftp/python/2.7.6/Python-2.7.6.tar.xz \
+ && tar -xvf Python-2.7.6.tar.xz \
+ && cd Python-2.7.6 \
+ && ./configure --prefix=/usr/local \
+ && make \
+ &&make altinstall
 
-RUN /usr/bin/python --version
+######################################################## Installing Apache Tomcat7 ############################################################
 
-################################ Installing Apache Tomcat #################################################
+# Install prepare infrastructure
+RUN yum -y update && \
+ yum -y install wget && \
+ yum -y install tar
 
-ENV CATALINA_HOME /usr/local/tomcat
-ENV PATH $CATALINA_HOME/bin:$PATH
-ENV JAVA_HOME /usr/lib/jvm/java-8-openjdk-amd64
-RUN mkdir -p "$CATALINA_HOME"
-WORKDIR $CATALINA_HOME
+# Prepare environment 
+ENV JAVA_HOME /opt/java
+ENV CATALINA_HOME /opt/tomcat
+ENV PATH $PATH:$JAVA_HOME/bin:$CATALINA_HOME/bin:$CATALINA_HOME/scripts
 
-ENV TOMCAT_NATIVE_LIBDIR $CATALINA_HOME/native-jni-lib
-ENV LD_LIBRARY_PATH ${LD_LIBRARY_PATH:+$LD_LIBRARY_PATH:}$TOMCAT_NATIVE_LIBDIR
+# Install Oracle Java8
+ENV JAVA_VERSION 8u121
+ENV JAVA_BUILD 8u121-b13
+ENV JAVA_DL_HASH e9e7ea248e2c4826b92b3f075a80e441
+
+RUN wget --no-check-certificate --no-cookies --header "Cookie: oraclelicense=accept-securebackup-cookie" \
+ http://download.oracle.com/otn-pub/java/jdk/${JAVA_BUILD}/${JAVA_DL_HASH}/jdk-${JAVA_VERSION}-linux-x64.tar.gz && \
+ tar -xvf jdk-${JAVA_VERSION}-linux-x64.tar.gz && \
+ rm jdk*.tar.gz && \
+ mv jdk* ${JAVA_HOME}
+
+
+# Install Tomcat
 ENV TOMCAT_MAJOR 7
 ENV TOMCAT_VERSION 7.0.77
 
-ENV TOMCAT_TGZ_URL https://www.apache.org/dyn/closer.cgi?action=download&filename=tomcat/tomcat-$TOMCAT_MAJOR/v$TOMCAT_VERSION/bin/apache-tomcat-$TOMCAT_VERSION.tar.gz
+RUN wget http://ftp.riken.jp/net/apache/tomcat/tomcat-${TOMCAT_MAJOR}/v${TOMCAT_VERSION}/bin/apache-tomcat-${TOMCAT_VERSION}.tar.gz && \
+ tar -xvf apache-tomcat-${TOMCAT_VERSION}.tar.gz && \
+ rm apache-tomcat*.tar.gz && \
+ mv apache-tomcat* ${CATALINA_HOME}
 
-RUN set -x \
-	\
-	&& wget -O tomcat.tar.gz "$TOMCAT_TGZ_URL" \
-	&& tar -xvf tomcat.tar.gz --strip-components=1 \
-	&& rm bin/*.bat \
-	&& rm tomcat.tar.gz* \
-	\
-	&& nativeBuildDir="$(mktemp -d)" \
-	&& tar -xvf bin/tomcat-native.tar.gz -C "$nativeBuildDir" --strip-components=1 \
-	&& nativeBuildDeps=" \
-		gcc \
-		libapr1-dev \
-		libssl-dev \
-		make \
-		openjdk-8-jdk \
-	" \
-	&& apt-get update && apt-get install -y --no-install-recommends $nativeBuildDeps \
-	&& ( \
-		export CATALINA_HOME="$PWD" \
-		&& cd "$nativeBuildDir/native" \
-		&& ./configure \
-			--libdir="$TOMCAT_NATIVE_LIBDIR" \
-			--prefix="$CATALINA_HOME" \
-			--with-apr="$(which apr-1-config)" \
-			--with-java-home=$JAVA_HOME \
-		&& make -j$(nproc) \
-		&& make install \
-	) \
-	&& rm -rf "$nativeBuildDir" \
-	&& rm bin/tomcat-native.tar.gz
+RUN chmod +x ${CATALINA_HOME}/bin/*sh
 
-# verify Tomcat Native is working properly
-RUN set -e \
-	&& nativeLines="$(catalina.sh configtest 2>&1)" \
-	&& nativeLines="$(echo "$nativeLines" | grep 'Apache Tomcat Native')" \
-	&& nativeLines="$(echo "$nativeLines" | sort -u)" \
-	&& if ! echo "$nativeLines" | grep 'INFO: Loaded APR based Apache Tomcat Native library' >&2; then \
-		echo >&2 "$nativeLines"; \
-		exit 1; \
-	fi
+WORKDIR /opt/tomcat
 
 EXPOSE 8080
+
 CMD ["catalina.sh", "run"]
 
 
-##################################################### Installing MongoDB ###########################################################
+############################################# Installing MongoDB #######################################################################
 
-# Add the package verification key
-RUN apt-key adv --keyserver keyserver.ubuntu.com --recv 7F0CEB10
+# Install prepare infrastructure
+RUN yum -y update
 
-# Add MongoDB to the repository sources list
-RUN echo 'deb http://downloads-distro.mongodb.org/repo/ubuntu-upstart dist 10gen' | tee /etc/apt/sources.list.d/mongodb.list
+# Add MongoDB to the repository
+COPY mongodb-org-3.4.repo /etc/yum.repos.d/mongodb-org-3.4.repo
 
-# Update the repository sources list once more
-RUN apt-get update
+# Install MongoDB package
+RUN yum repolist
+RUN yum install -y mongodb-org
 
-# Install MongoDB package (.deb)
-RUN apt-get install -y mongodb-10gen
-
-RUN mkdir -p /data/db /data/configdb && chown -R mongodb:mongodb /data/db /data/configdb
+RUN mkdir -p /data/db /data/configdb && chown -R mongod:mongod /data/db /data/configdb
 VOLUME /data/db /data/configdb
-
 
 # Expose the default port
 EXPOSE 27017
 
-CMD ["mongod"]
+CMD ["/usr/bin/mongod"]
