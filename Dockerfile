@@ -63,8 +63,6 @@ WORKDIR /opt/tomcat
 
 EXPOSE 8080
 
-CMD ["catalina.sh", "run"]
-
 
 ############################################# Installing MongoDB #######################################################################
 
@@ -84,4 +82,4 @@ VOLUME /data/db /data/configdb
 # Expose the default port
 EXPOSE 27017
 
-CMD ["/usr/bin/mongod"]
+CMD /opt/tomcat/bin/startup.sh && /etc/init.d/mongod start && /bin/bash
